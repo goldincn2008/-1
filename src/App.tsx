@@ -5,12 +5,114 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, Skull, Play, RotateCcw, Shield, Languages } from 'lucide-react';
+import { Trophy, Skull, Play, RotateCcw, Shield, Languages, Volume2, VolumeX } from 'lucide-react';
 import { GameStatus, Point, Missile, EnemyRocket, Battery, City } from './types';
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
 const WIN_SCORE = 1000;
+
+// Audio Helpers
+const audioCtxRef: { current: AudioContext | null } = { current: null };
+
+const getAudioCtx = () => {
+  if (!audioCtxRef.current) {
+    audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+  }
+  return audioCtxRef.current;
+};
+
+const playExplosionSound = () => {
+  const ctx = getAudioCtx();
+  const oscillator = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+
+  oscillator.type = 'sawtooth';
+  oscillator.frequency.setValueAtTime(150, ctx.currentTime);
+  oscillator.frequency.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+
+  gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+
+  oscillator.connect(gainNode);
+  gainNode.connect(ctx.destination);
+
+  oscillator.start();
+  oscillator.stop(ctx.currentTime + 0.5);
+};
+
+const playLaunchSound = () => {
+  const ctx = getAudioCtx();
+  const oscillator = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(400, ctx.currentTime);
+  oscillator.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.1);
+
+  gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+
+  oscillator.connect(gainNode);
+  gainNode.connect(ctx.destination);
+
+  oscillator.start();
+  oscillator.stop(ctx.currentTime + 0.1);
+};
+
+const playBgm = () => {
+  const ctx = getAudioCtx();
+  const tempo = 150;
+  const noteDuration = 60 / tempo / 2; // 16th notes
+  
+  // Simplified Contra-like bassline sequence (frequencies)
+  const sequence = [
+    110, 110, 164, 110, 146, 110, 164, 110,
+    110, 110, 164, 110, 146, 110, 164, 110,
+    98, 98, 146, 98, 130, 98, 146, 98,
+    82, 82, 123, 82, 110, 82, 123, 82
+  ];
+
+  let nextNoteTime = ctx.currentTime;
+  let noteIndex = 0;
+
+  const masterGain = ctx.createGain();
+  masterGain.gain.setValueAtTime(0.05, ctx.currentTime);
+  masterGain.connect(ctx.destination);
+
+  const playNote = () => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(sequence[noteIndex], nextNoteTime);
+    
+    gain.gain.setValueAtTime(0.5, nextNoteTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, nextNoteTime + noteDuration * 0.9);
+    
+    osc.connect(gain);
+    gain.connect(masterGain);
+    
+    osc.start(nextNoteTime);
+    osc.stop(nextNoteTime + noteDuration);
+    
+    noteIndex = (noteIndex + 1) % sequence.length;
+    nextNoteTime += noteDuration;
+    
+    // Schedule next note
+    const timeout = (nextNoteTime - ctx.currentTime) * 1000 - 50;
+    return setTimeout(playNote, Math.max(0, timeout));
+  };
+
+  const timerId = playNote();
+
+  return {
+    stop: () => {
+      clearTimeout(timerId);
+      masterGain.disconnect();
+    }
+  };
+};
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -18,6 +120,8 @@ export default function App() {
   const [score, setScore] = useState(0);
   const [level, setLevel] = useState(1);
   const [lang, setLang] = useState<'zh' | 'en'>('zh');
+  const [isMuted, setIsMuted] = useState(false);
+  const bgmRef = useRef<{ stop: () => void } | null>(null);
   
   // Game entities refs to avoid re-renders during game loop
   const entitiesRef = useRef({
@@ -25,57 +129,61 @@ export default function App() {
     enemyRockets: [] as EnemyRocket[],
     batteries: [] as Battery[],
     cities: [] as City[],
-    stars: [] as { x: number, y: number, size: number, opacity: number }[],
+    clouds: [] as { x: number, y: number, width: number, height: number, speed: number, opacity: number }[],
     lastEnemySpawn: 0,
     frameCount: 0,
+    shake: 0,
   });
 
   const t = {
     zh: {
-      title: '云宝新星防御',
-      start: '开始游戏',
-      win: '恭喜！你成功守护了城市',
-      lose: '城市已沦陷...',
-      score: '得分',
-      level: '关卡',
-      restart: '再玩一次',
-      missiles: '导弹',
-      target: '目标得分',
-      instructions: '点击屏幕发射拦截导弹。预判敌方火箭轨迹，利用爆炸范围摧毁它们。',
+      title: 'SKY GUARDIAN',
+      start: 'START DEFENSE',
+      win: 'MISSION SUCCESS: AIRSPACE SECURED',
+      lose: 'MISSION FAILURE: AIRSPACE BREACHED',
+      score: 'INTERCEPTIONS',
+      level: 'WAVE',
+      restart: 'RETRY MISSION',
+      missiles: 'SHURIKENS',
+      target: 'GOAL',
+      instructions: 'Protect the airspace from incoming threats. Deploy high-velocity shurikens to intercept enemy projectiles.',
     },
     en: {
-      title: 'Yunbao Nova Defense',
-      start: 'Start Game',
-      win: 'Victory! Cities Protected',
-      lose: 'Cities Fallen...',
-      score: 'Score',
-      level: 'Level',
-      restart: 'Play Again',
-      missiles: 'Missiles',
-      target: 'Target Score',
-      instructions: 'Click to fire interceptors. Predict rocket paths and use explosion AOE to destroy them.',
+      title: 'SKY GUARDIAN',
+      start: 'START DEFENSE',
+      win: 'MISSION SUCCESS: AIRSPACE SECURED',
+      lose: 'MISSION FAILURE: AIRSPACE BREACHED',
+      score: 'INTERCEPTIONS',
+      level: 'WAVE',
+      restart: 'RETRY MISSION',
+      missiles: 'SHURIKENS',
+      target: 'GOAL',
+      instructions: 'Protect the airspace from incoming threats. Deploy high-velocity shurikens to intercept enemy projectiles.',
     }
   }[lang];
 
   const initGame = useCallback(() => {
     const batteries: Battery[] = [
-      { id: 'b1', x: 100, y: CANVAS_HEIGHT - 40, missiles: 120, maxMissiles: 120, isDestroyed: false },
-      { id: 'b2', x: 400, y: CANVAS_HEIGHT - 40, missiles: 240, maxMissiles: 240, isDestroyed: false },
-      { id: 'b3', x: 700, y: CANVAS_HEIGHT - 40, missiles: 120, maxMissiles: 120, isDestroyed: false },
+      { id: 'b1', x: 100, y: CANVAS_HEIGHT - 40, modelName: 'China', missiles: 120, maxMissiles: 120, isDestroyed: false },
+      { id: 'b2', x: 400, y: CANVAS_HEIGHT - 40, modelName: 'USA', missiles: 240, maxMissiles: 240, isDestroyed: false },
+      { id: 'b3', x: 700, y: CANVAS_HEIGHT - 40, modelName: 'Russia', missiles: 120, maxMissiles: 120, isDestroyed: false },
     ];
     
     const cities: City[] = [
-      { id: 'c1', x: 200, y: CANVAS_HEIGHT - 20, isDestroyed: false },
-      { id: 'c2', x: 300, y: CANVAS_HEIGHT - 20, isDestroyed: false },
-      { id: 'c3', x: 500, y: CANVAS_HEIGHT - 20, isDestroyed: false },
-      { id: 'c4', x: 600, y: CANVAS_HEIGHT - 20, isDestroyed: false },
+      { id: 'c1', x: 180, y: CANVAS_HEIGHT - 30, modelName: 'France', isDestroyed: false },
+      { id: 'c2', x: 280, y: CANVAS_HEIGHT - 30, modelName: 'UK', isDestroyed: false },
+      { id: 'c3', x: 520, y: CANVAS_HEIGHT - 30, modelName: 'Germany', isDestroyed: false },
+      { id: 'c4', x: 620, y: CANVAS_HEIGHT - 30, modelName: 'Australia', isDestroyed: false },
+      { id: 'c5', x: 350, y: CANVAS_HEIGHT - 30, modelName: 'North Korea', isDestroyed: false },
     ];
 
-    const stars = Array.from({ length: 100 }, () => ({
+    const clouds = Array.from({ length: 15 }, () => ({
       x: Math.random() * CANVAS_WIDTH,
-      y: Math.random() * CANVAS_HEIGHT,
-      size: Math.random() * 2,
-      opacity: Math.random()
+      y: Math.random() * CANVAS_HEIGHT * 0.7,
+      width: 100 + Math.random() * 200,
+      height: 40 + Math.random() * 60,
+      speed: 0.2 + Math.random() * 0.5,
+      opacity: 0.3 + Math.random() * 0.5
     }));
 
     entitiesRef.current = {
@@ -83,14 +191,173 @@ export default function App() {
       enemyRockets: [],
       batteries,
       cities,
-      stars,
+      clouds,
       lastEnemySpawn: 0,
       frameCount: 0,
+      shake: 0,
     };
     setScore(0);
     setLevel(1);
     setGameState(GameStatus.PLAYING);
-  }, []);
+
+    if (!isMuted) {
+      if (bgmRef.current) {
+        try { bgmRef.current.stop(); } catch (e) {}
+      }
+      bgmRef.current = playBgm();
+    }
+  }, [isMuted]);
+
+  const drawFlag = (ctx: CanvasRenderingContext2D, x: number, y: number, country: string, isDestroyed: boolean, size: number = 30) => {
+    if (isDestroyed) {
+      ctx.fillStyle = '#333';
+      ctx.fillRect(x - size/2, y - size/4, size, size/2);
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(x - size/2, y - size/4);
+    const w = size;
+    const h = size / 1.5;
+
+    // Default background
+    ctx.fillStyle = '#eee';
+    ctx.fillRect(0, 0, w, h);
+
+    switch (country) {
+      case 'China':
+        ctx.fillStyle = '#de2910';
+        ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#ffde00';
+        ctx.beginPath();
+        for(let i=0; i<5; i++) {
+          const angle = (i * 0.8 - 0.5) * Math.PI;
+          ctx.lineTo(w*0.2 + Math.cos(angle)*h*0.15, h*0.3 + Math.sin(angle)*h*0.15);
+          const angle2 = (i * 0.8 - 0.1) * Math.PI;
+          ctx.lineTo(w*0.2 + Math.cos(angle2)*h*0.06, h*0.3 + Math.sin(angle2)*h*0.06);
+        }
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 'USA':
+        ctx.fillStyle = '#b22234';
+        ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#fff';
+        for(let i=0; i<13; i++) if(i%2===1) ctx.fillRect(0, i*(h/13), w, h/13);
+        ctx.fillStyle = '#3c3b6e';
+        ctx.fillRect(0, 0, w*0.45, h*0.53);
+        ctx.fillStyle = '#fff';
+        ctx.font = `${h/8}px Arial`;
+        ctx.fillText('★★★★★', w*0.02, h*0.2);
+        ctx.fillText('★★★★★', w*0.02, h*0.4);
+        break;
+      case 'Russia':
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h/3);
+        ctx.fillStyle = '#0039a6'; ctx.fillRect(0, h/3, w, h/3);
+        ctx.fillStyle = '#d52b1e'; ctx.fillRect(0, 2*h/3, w, h/3);
+        break;
+      case 'France':
+        ctx.fillStyle = '#002395'; ctx.fillRect(0, 0, w/3, h);
+        ctx.fillStyle = '#fff'; ctx.fillRect(w/3, 0, w/3, h);
+        ctx.fillStyle = '#ed2939'; ctx.fillRect(2*w/3, 0, w/3, h);
+        break;
+      case 'UK':
+        ctx.fillStyle = '#00247d'; ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = h/5;
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(w,h); ctx.moveTo(w,0); ctx.lineTo(0,h); ctx.stroke();
+        ctx.strokeStyle = '#cf142b'; ctx.lineWidth = h/10;
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(w,h); ctx.moveTo(w,0); ctx.lineTo(0,h); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.fillRect(w*0.4, 0, w*0.2, h); ctx.fillRect(0, h*0.4, w, h*0.2);
+        ctx.fillStyle = '#cf142b'; ctx.fillRect(w*0.45, 0, w*0.1, h); ctx.fillRect(0, h*0.45, w, h*0.1);
+        break;
+      case 'Germany':
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h/3);
+        ctx.fillStyle = '#d00'; ctx.fillRect(0, h/3, w, h/3);
+        ctx.fillStyle = '#ffce00'; ctx.fillRect(0, 2*h/3, w, h/3);
+        break;
+      case 'Australia':
+        ctx.fillStyle = '#00008b'; ctx.fillRect(0, 0, w, h);
+        // Union Jack mini
+        ctx.save(); ctx.scale(0.4, 0.4);
+        ctx.fillStyle = '#00247d'; ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = h/5;
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(w,h); ctx.moveTo(w,0); ctx.lineTo(0,h); ctx.stroke();
+        ctx.strokeStyle = '#cf142b'; ctx.lineWidth = h/10;
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(w,h); ctx.moveTo(w,0); ctx.lineTo(0,h); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.fillRect(w*0.4, 0, w*0.2, h); ctx.fillRect(0, h*0.4, w, h*0.2);
+        ctx.fillStyle = '#cf142b'; ctx.fillRect(w*0.45, 0, w*0.1, h); ctx.fillRect(0, h*0.45, w, h*0.1);
+        ctx.restore();
+        ctx.fillStyle = '#fff'; ctx.font = `${h/4}px Arial`; ctx.fillText('★', w*0.7, h*0.6);
+        break;
+      case 'North Korea':
+        ctx.fillStyle = '#024fa2'; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, h*0.2, w, h*0.6);
+        ctx.fillStyle = '#ed1c24'; ctx.fillRect(0, h*0.25, w, h*0.5);
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(w*0.3, h*0.5, h*0.18, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ed1c24'; ctx.beginPath();
+        for(let i=0; i<5; i++) {
+          const angle = (i * 0.8 - 0.5) * Math.PI;
+          ctx.lineTo(w*0.3 + Math.cos(angle)*h*0.15, h*0.5 + Math.sin(angle)*h*0.15);
+          const angle2 = (i * 0.8 - 0.1) * Math.PI;
+          ctx.lineTo(w*0.3 + Math.cos(angle2)*h*0.06, h*0.5 + Math.sin(angle2)*h*0.06);
+        }
+        ctx.closePath(); ctx.fill();
+        break;
+      case 'Japan':
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#bc002d'; ctx.beginPath(); ctx.arc(w*0.5, h*0.5, h*0.3, 0, Math.PI*2); ctx.fill();
+        break;
+      case 'Italy':
+        ctx.fillStyle = '#008c45'; ctx.fillRect(0, 0, w/3, h);
+        ctx.fillStyle = '#f4f5f0'; ctx.fillRect(w/3, 0, w/3, h);
+        ctx.fillStyle = '#cd212a'; ctx.fillRect(2*w/3, 0, w/3, h);
+        break;
+      case 'India':
+        ctx.fillStyle = '#ff9933'; ctx.fillRect(0, 0, w, h/3);
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, h/3, w, h/3);
+        ctx.fillStyle = '#138808'; ctx.fillRect(0, 2*h/3, w, h/3);
+        ctx.strokeStyle = '#000080'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(w*0.5, h*0.5, h*0.15, 0, Math.PI*2); ctx.stroke();
+        break;
+      case 'South Korea':
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#cd2e3a'; ctx.beginPath(); ctx.arc(w*0.5, h*0.5, h*0.25, Math.PI, 0); ctx.fill();
+        ctx.fillStyle = '#0047a0'; ctx.beginPath(); ctx.arc(w*0.5, h*0.5, h*0.25, 0, Math.PI); ctx.fill();
+        break;
+      case 'Canada':
+        ctx.fillStyle = '#f00'; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#fff'; ctx.fillRect(w*0.25, 0, w*0.5, h);
+        ctx.fillStyle = '#f00'; ctx.font = `${h/2}px serif`; ctx.fillText('🍁', w*0.35, h*0.65);
+        break;
+      case 'Brazil':
+        ctx.fillStyle = '#009739'; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#fed100'; ctx.beginPath(); ctx.moveTo(w*0.5, h*0.1); ctx.lineTo(w*0.9, h*0.5); ctx.lineTo(w*0.5, h*0.9); ctx.lineTo(w*0.1, h*0.5); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#012169'; ctx.beginPath(); ctx.arc(w*0.5, h*0.5, h*0.2, 0, Math.PI*2); ctx.fill();
+        break;
+      case 'Israel':
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#0038b8'; ctx.fillRect(0, h*0.1, w, h*0.15); ctx.fillRect(0, h*0.75, w, h*0.15);
+        ctx.font = `${h/3}px serif`; ctx.fillText('✡', w*0.35, h*0.6);
+        break;
+      case 'Turkey':
+        ctx.fillStyle = '#e30a17'; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(w*0.45, h*0.5, h*0.25, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#e30a17'; ctx.beginPath(); ctx.arc(w*0.55, h*0.5, h*0.2, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = `${h/4}px serif`; ctx.fillText('★', w*0.6, h*0.55);
+        break;
+      case 'Ukraine':
+        ctx.fillStyle = '#0057b7'; ctx.fillRect(0, 0, w, h/2);
+        ctx.fillStyle = '#ffd700'; ctx.fillRect(0, h/2, w, h/2);
+        break;
+      default:
+        ctx.fillStyle = `hsl(${Math.random()*360}, 70%, 50%)`;
+        ctx.fillRect(0, 0, w, h);
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, 0, w, h);
+    ctx.restore();
+  };
 
   const drawStar = (ctx: CanvasRenderingContext2D, cx: number, cy: number, spikes: number, outerRadius: number, innerRadius: number) => {
     let rot = Math.PI / 2 * 3;
@@ -135,6 +402,7 @@ export default function App() {
     });
 
     if (closestBattery) {
+      if (!isMuted) playLaunchSound();
       const shots = 12;
       closestBattery.missiles = Math.max(0, closestBattery.missiles - shots);
       
@@ -155,8 +423,8 @@ export default function App() {
           progress: 0,
           isExploding: false,
           explosionRadius: 0,
-          maxExplosionRadius: 40,
-          explosionSpeed: 1.5,
+          maxExplosionRadius: 70,
+          explosionSpeed: 2.5,
           isFinished: false,
         };
         entitiesRef.current.missiles.push(newMissile);
@@ -201,6 +469,22 @@ export default function App() {
       const { missiles, enemyRockets, batteries, cities } = entitiesRef.current;
       entitiesRef.current.frameCount++;
 
+      // Decay screen shake
+      if (entitiesRef.current.shake > 0.1) {
+        entitiesRef.current.shake *= 0.85;
+      } else {
+        entitiesRef.current.shake = 0;
+      }
+
+      // Update clouds
+      entitiesRef.current.clouds.forEach(cloud => {
+        cloud.x += cloud.speed;
+        if (cloud.x > CANVAS_WIDTH) {
+          cloud.x = -cloud.width;
+          cloud.y = Math.random() * CANVAS_HEIGHT * 0.7;
+        }
+      });
+
       // Spawn enemy rockets
       const spawnRate = Math.max(40, 200 - level * 20);
       if (entitiesRef.current.frameCount % spawnRate === 0) {
@@ -208,6 +492,7 @@ export default function App() {
         if (targets.length > 0) {
           const target = targets[Math.floor(Math.random() * targets.length)];
           const startX = Math.random() * CANVAS_WIDTH;
+          const countries = ['Japan', 'Canada', 'Brazil', 'India', 'Italy', 'Spain', 'Mexico', 'Egypt', 'Sweden', 'Norway', 'South Korea', 'Israel', 'Turkey', 'Iran', 'Ukraine', 'Argentina'];
           enemyRockets.push({
             id: Math.random().toString(36).substr(2, 9),
             x: startX,
@@ -219,6 +504,7 @@ export default function App() {
             speed: 0.0005 + level * 0.00025,
             progress: 0,
             isDestroyed: false,
+            country: countries[Math.floor(Math.random() * countries.length)],
           });
         }
       }
@@ -286,6 +572,8 @@ export default function App() {
         });
 
         if (hit) {
+          if (!isMuted) playExplosionSound();
+          entitiesRef.current.shake = 15;
           setScore(s => {
             const newScore = s + 20;
             if (newScore >= WIN_SCORE) {
@@ -307,6 +595,7 @@ export default function App() {
         // Check collision with ground/targets
         if (r.progress >= 1) {
           // Hit target
+          entitiesRef.current.shake = 25;
           cities.forEach(c => {
             if (Math.abs(c.x - r.x) < 20) c.isDestroyed = true;
           });
@@ -324,84 +613,52 @@ export default function App() {
     };
 
     const draw = () => {
-      // Space Background
-      ctx.fillStyle = '#050508';
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-      const { missiles, enemyRockets, batteries, cities, stars } = entitiesRef.current;
-
-      // Draw Stars
-      stars.forEach(star => {
-        ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity})`;
-        ctx.beginPath();
-        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      // Subtle Nebula
-      const gradient = ctx.createRadialGradient(CANVAS_WIDTH/2, CANVAS_HEIGHT/2, 0, CANVAS_WIDTH/2, CANVAS_HEIGHT/2, CANVAS_WIDTH);
-      gradient.addColorStop(0, 'rgba(30, 0, 60, 0.1)');
-      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-      // Draw ground (Lunar Surface)
-      ctx.fillStyle = '#333';
-      ctx.fillRect(0, CANVAS_HEIGHT - 10, CANVAS_WIDTH, 10);
-      // Add craters or details to ground
-      ctx.fillStyle = '#222';
-      for(let i=0; i<CANVAS_WIDTH; i+=50) {
-        ctx.beginPath();
-        ctx.arc(i + Math.sin(i)*10, CANVAS_HEIGHT - 5, 5, 0, Math.PI, true);
-        ctx.fill();
+      const { shake, clouds, missiles, enemyRockets, batteries, cities } = entitiesRef.current;
+      ctx.save();
+      if (shake > 0) {
+        ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
       }
 
-      // Draw Cities (Space Outposts)
-      cities.forEach(c => {
-        if (!c.isDestroyed) {
-          ctx.fillStyle = '#00f2ff';
-          ctx.beginPath();
-          ctx.arc(c.x, c.y - 10, 15, Math.PI, 0);
-          ctx.fill();
-          ctx.fillRect(c.x - 15, c.y - 10, 30, 10);
-          // Antenna
-          ctx.strokeStyle = '#00f2ff';
-          ctx.beginPath();
-          ctx.moveTo(c.x, c.y - 25);
-          ctx.lineTo(c.x, c.y - 35);
-          ctx.stroke();
-        } else {
-          ctx.fillStyle = '#444';
-          ctx.fillRect(c.x - 15, c.y - 5, 30, 5);
-        }
+      // Sky Background (Aerial View)
+      const skyGradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+      skyGradient.addColorStop(0, '#4facfe'); // Deep blue sky
+      skyGradient.addColorStop(1, '#00f2fe'); // Lighter horizon
+      ctx.fillStyle = skyGradient;
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+      // Draw Clouds
+      clouds.forEach(cloud => {
+        ctx.fillStyle = `rgba(255, 255, 255, ${cloud.opacity})`;
+        ctx.beginPath();
+        ctx.ellipse(cloud.x + cloud.width/2, cloud.y + cloud.height/2, cloud.width/2, cloud.height/2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Add some "fluff" to clouds
+        ctx.beginPath();
+        ctx.arc(cloud.x + cloud.width * 0.3, cloud.y + cloud.height * 0.2, cloud.height * 0.4, 0, Math.PI * 2);
+        ctx.arc(cloud.x + cloud.width * 0.7, cloud.y + cloud.height * 0.2, cloud.height * 0.4, 0, Math.PI * 2);
+        ctx.fill();
       });
 
-      // Draw Batteries (Defense Turrets)
-      batteries.forEach(b => {
-        if (!b.isDestroyed) {
-          ctx.fillStyle = '#ff0055';
-          ctx.beginPath();
-          ctx.moveTo(b.x - 20, b.y + 10);
-          ctx.lineTo(b.x, b.y - 15);
-          ctx.lineTo(b.x + 20, b.y + 10);
-          ctx.fill();
-          
-          // Glowing core
-          ctx.fillStyle = '#fff';
-          ctx.beginPath();
-          ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
-          ctx.fill();
+      // Draw ground (Aerial Landscape)
+      ctx.fillStyle = '#2d5a27'; // Green fields
+      ctx.fillRect(0, CANVAS_HEIGHT - 20, CANVAS_WIDTH, 20);
+      
+      // Draw Cities (Flags)
+      cities.forEach(c => {
+        drawFlag(ctx, c.x, c.y, c.modelName, c.isDestroyed, 24);
+      });
 
+      // Draw Batteries (Flags)
+      batteries.forEach(b => {
+        drawFlag(ctx, b.x, b.y, b.modelName, b.isDestroyed, 32);
+        
+        if (!b.isDestroyed) {
           // Ammo indicator
           ctx.fillStyle = '#fff';
           ctx.font = '10px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText(b.missiles.toString(), b.x, b.y + 25);
-        } else {
-          ctx.fillStyle = '#444';
-          ctx.beginPath();
-          ctx.arc(b.x, b.y + 5, 10, 0, Math.PI, true);
-          ctx.fill();
+          ctx.fillText(b.missiles.toString(), b.x, b.y + 30);
         }
       });
 
@@ -426,11 +683,17 @@ export default function App() {
         // Body
         ctx.fillStyle = '#ff4444';
         ctx.beginPath();
-        ctx.moveTo(10, 0);
-        ctx.lineTo(-5, -5);
-        ctx.lineTo(-5, 5);
+        ctx.moveTo(25, 0);
+        ctx.lineTo(-15, -12);
+        ctx.lineTo(-15, 12);
         ctx.closePath();
         ctx.fill();
+
+        // Flag on rocket
+        ctx.save();
+        ctx.translate(-5, -6);
+        drawFlag(ctx, 0, 0, r.country, false, 18);
+        ctx.restore();
         
         // Engine Glow
         ctx.fillStyle = '#ffaa00';
@@ -455,29 +718,33 @@ export default function App() {
           ctx.lineTo(m.x, m.y);
           ctx.stroke();
 
-          // Kitchen Knife Body
+          // Shuriken (Dart) Body
           const angle = Math.atan2(m.targetY - m.y, m.targetX - m.x);
           ctx.save();
           ctx.translate(m.x, m.y);
-          ctx.rotate(angle);
+          ctx.rotate(angle + entitiesRef.current.frameCount * 0.2); // Spinning effect
           
-          // Blade
           ctx.fillStyle = '#e5e7eb';
-          ctx.fillRect(0, -8, 24, 16);
-          
-          // Blade edge
           ctx.strokeStyle = '#9ca3af';
-          ctx.lineWidth = 0.5;
-          ctx.strokeRect(0, -8, 24, 16);
+          ctx.lineWidth = 2;
           
-          // Handle
-          ctx.fillStyle = '#4b5563';
-          ctx.fillRect(-12, -4, 12, 8);
+          // Draw 4-pointed star (Shuriken)
+          const size = 15;
+          ctx.beginPath();
+          for (let i = 0; i < 4; i++) {
+            const a = (i * Math.PI) / 2;
+            ctx.lineTo(Math.cos(a) * size, Math.sin(a) * size);
+            const a2 = a + Math.PI / 4;
+            ctx.lineTo(Math.cos(a2) * size * 0.4, Math.sin(a2) * size * 0.4);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
           
-          // Hole in blade
+          // Center hole
           ctx.fillStyle = '#050508';
           ctx.beginPath();
-          ctx.arc(16, -4, 2, 0, Math.PI * 2);
+          ctx.arc(0, 0, 3, 0, Math.PI * 2);
           ctx.fill();
           
           ctx.restore();
@@ -493,26 +760,41 @@ export default function App() {
         } else {
           const alpha = 1 - m.explosionRadius / m.maxExplosionRadius;
           
-          // Outer Star
-          ctx.fillStyle = `rgba(255, 255, 0, ${alpha * 0.5})`;
-          drawStar(ctx, m.x, m.y, 5, m.explosionRadius, m.explosionRadius * 0.4);
+          // Exaggerated Explosion
+          ctx.save();
+          
+          // Outer Fireball
+          const grad = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.explosionRadius);
+          grad.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
+          grad.addColorStop(0.2, `rgba(255, 255, 0, ${alpha})`);
+          grad.addColorStop(0.5, `rgba(255, 100, 0, ${alpha * 0.8})`);
+          grad.addColorStop(1, `rgba(255, 0, 0, 0)`);
+          
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, m.explosionRadius, 0, Math.PI * 2);
           ctx.fill();
 
-          // Inner Star
-          ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-          drawStar(ctx, m.x, m.y, 5, m.explosionRadius * 0.7, m.explosionRadius * 0.2);
-          ctx.fill();
-          
-          // Glow
-          ctx.shadowBlur = 15;
-          ctx.shadowColor = 'rgba(255, 255, 0, 0.8)';
-          ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+          // Spiky bits
+          ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.5})`;
           ctx.lineWidth = 2;
-          drawStar(ctx, m.x, m.y, 5, m.explosionRadius * 0.5, m.explosionRadius * 0.1);
+          drawStar(ctx, m.x, m.y, 8, m.explosionRadius * 1.2, m.explosionRadius * 0.5);
           ctx.stroke();
-          ctx.shadowBlur = 0;
+          
+          // Particle sparks
+          for (let p = 0; p < 8; p++) {
+            const pAngle = (p / 8) * Math.PI * 2 + m.explosionRadius * 0.1;
+            const px = m.x + Math.cos(pAngle) * m.explosionRadius * 0.8;
+            const py = m.y + Math.sin(pAngle) * m.explosionRadius * 0.8;
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+            ctx.fillRect(px - 2, py - 2, 4, 4);
+          }
+          
+          ctx.restore();
         }
       });
+
+      ctx.restore();
     };
 
     const loop = () => {
@@ -523,15 +805,22 @@ export default function App() {
 
     loop();
 
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [gameState, level]);
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      if (bgmRef.current) {
+        try {
+          bgmRef.current.stop();
+        } catch (e) {}
+      }
+    };
+  }, [gameState, level, isMuted]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-4 font-sans overflow-hidden">
       {/* Header UI */}
       <div className="w-full max-w-[800px] flex justify-between items-center mb-4 px-2">
         <div className="flex flex-col">
-          <h1 className="text-2xl font-bold tracking-tighter text-emerald-400 flex items-center gap-2">
+          <h1 className="text-2xl font-black tracking-tighter text-sky-600 flex items-center gap-2 italic">
             <Shield className="w-6 h-6" />
             {t.title}
           </h1>
@@ -541,12 +830,20 @@ export default function App() {
           </div>
         </div>
         
-        <button 
-          onClick={() => setLang(l => l === 'zh' ? 'en' : 'zh')}
-          className="p-2 rounded-full hover:bg-white/10 transition-colors"
-        >
-          <Languages className="w-5 h-5" />
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setIsMuted(!isMuted)}
+            className="p-2 rounded-full hover:bg-white/10 transition-colors"
+          >
+            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+          </button>
+          <button 
+            onClick={() => setLang(l => l === 'zh' ? 'en' : 'zh')}
+            className="p-2 rounded-full hover:bg-white/10 transition-colors"
+          >
+            <Languages className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       {/* Game Container */}
@@ -561,31 +858,71 @@ export default function App() {
         />
 
         {/* Overlays */}
+        <div className="absolute inset-0 pointer-events-none border-[40px] border-black/20 rounded-2xl" style={{ boxShadow: 'inset 0 0 100px rgba(0,0,0,0.5)' }} />
+        <div className="absolute inset-0 pointer-events-none flex justify-between px-10">
+          <div className="w-1 h-full bg-black/10" />
+          <div className="w-1 h-full bg-black/10" />
+        </div>
+        
         <AnimatePresence>
           {gameState === GameStatus.START && (
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-8 text-center"
+              className="absolute inset-0 bg-[#050505] flex flex-col items-center justify-center p-8 text-center"
             >
+              <div className="absolute inset-0 opacity-10 pointer-events-none">
+                <div className="w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-red-900/20 via-transparent to-transparent" />
+              </div>
+
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ duration: 0.8, ease: "easeOut" }}
+                className="mb-8"
+              >
+                <Shield className="w-24 h-24 text-sky-500 mx-auto drop-shadow-[0_0_15px_rgba(14,165,233,0.5)]" />
+              </motion.div>
+
               <motion.h2 
-                initial={{ y: 20 }}
-                animate={{ y: 0 }}
-                className="text-4xl font-bold mb-4 text-emerald-400"
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                className="text-6xl font-black mb-6 text-white tracking-tighter italic"
+                style={{
+                  textShadow: '3px 3px 0px #0284c7, 6px 6px 0px rgba(0,0,0,0.5)'
+                }}
               >
                 {t.title}
               </motion.h2>
-              <p className="max-w-md mb-8 text-gray-400 text-sm leading-relaxed">
-                {t.instructions}
-              </p>
-              <button 
-                onClick={initGame}
-                className="group relative px-8 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-full transition-all flex items-center gap-2 overflow-hidden"
+              
+              <motion.p 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.6 }}
+                className="max-w-md mb-12 text-gray-400 text-xs uppercase tracking-[0.3em] font-mono leading-relaxed"
               >
-                <Play className="w-5 h-5" />
-                {t.start}
-              </button>
+                {t.instructions}
+              </motion.p>
+
+              <motion.button 
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.9 }}
+                onClick={initGame}
+                className="group relative px-12 py-4 bg-white hover:bg-red-600 text-black hover:text-white font-black rounded-sm transition-all flex items-center gap-3 overflow-hidden border-b-4 border-gray-300 hover:border-red-800 active:translate-y-1 active:border-b-0"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+                <Play className="w-5 h-5 fill-current" />
+                <span className="tracking-widest">{t.start}</span>
+              </motion.button>
+              
+              <div className="mt-12 flex gap-8 opacity-30 grayscale">
+                <div className="text-[10px] font-mono">AERIAL DEFENSE</div>
+                <div className="text-[10px] font-mono">CLOUD SHIELD</div>
+                <div className="text-[10px] font-mono">SKY INTERCEPTOR</div>
+              </div>
             </motion.div>
           )}
 
@@ -635,7 +972,7 @@ export default function App() {
 
       {/* Footer Instructions */}
       <div className="mt-8 text-center opacity-40 text-[10px] uppercase tracking-[0.2em] font-mono">
-        &copy; 2024 云宝新星防御 &bull; Strategic Interception System
+        &copy; 2024 SKY GUARDIAN &bull; STRATEGIC AIR COMMAND
       </div>
     </div>
   );

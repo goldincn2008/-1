@@ -38,15 +38,18 @@ export interface EnemyRocket extends Entity {
   speed: number;
   progress: number;
   isDestroyed: boolean;
+  country: string;
 }
 
 export interface Battery extends Entity {
+  modelName: string;
   missiles: number;
   maxMissiles: number;
   isDestroyed: boolean;
 }
 
 export interface City extends Entity {
+  modelName: string;
   isDestroyed: boolean;
 }
 
