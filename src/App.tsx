@@ -816,52 +816,55 @@ export default function App() {
   }, [gameState, level, isMuted]);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-4 font-sans overflow-hidden">
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-2 sm:p-4 font-sans overflow-hidden">
       {/* Header UI */}
-      <div className="w-full max-w-[800px] flex justify-between items-center mb-4 px-2">
+      <div className="w-full max-w-[800px] flex justify-between items-center mb-2 sm:mb-4 px-2">
         <div className="flex flex-col">
-          <h1 className="text-2xl font-black tracking-tighter text-sky-600 flex items-center gap-2 italic">
-            <Shield className="w-6 h-6" />
+          <h1 className="text-lg sm:text-2xl font-black tracking-tighter text-sky-600 flex items-center gap-2 italic">
+            <Shield className="w-5 h-5 sm:w-6 sm:h-6" />
             {t.title}
           </h1>
-          <div className="flex gap-4 text-xs font-mono opacity-60">
+          <div className="flex gap-2 sm:gap-4 text-[10px] sm:text-xs font-mono opacity-60">
             <span>{t.score}: {score}</span>
             <span>{t.target}: {WIN_SCORE}</span>
           </div>
         </div>
         
-        <div className="flex gap-2">
+        <div className="flex gap-1 sm:gap-2">
           <button 
             onClick={() => setIsMuted(!isMuted)}
-            className="p-2 rounded-full hover:bg-white/10 transition-colors"
+            className="p-1.5 sm:p-2 rounded-full hover:bg-white/10 transition-colors"
           >
-            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            {isMuted ? <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" /> : <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />}
           </button>
           <button 
             onClick={() => setLang(l => l === 'zh' ? 'en' : 'zh')}
-            className="p-2 rounded-full hover:bg-white/10 transition-colors"
+            className="p-1.5 sm:p-2 rounded-full hover:bg-white/10 transition-colors"
           >
-            <Languages className="w-5 h-5" />
+            <Languages className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
       </div>
 
       {/* Game Container */}
-      <div className="relative w-full max-w-[800px] aspect-[4/3] bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/5">
+      <div className="relative w-full max-w-[800px] max-h-[80vh] aspect-[4/3] bg-black rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl border border-white/5">
         <canvas
           ref={canvasRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
           onClick={handleCanvasClick}
-          onTouchStart={handleCanvasClick}
-          className="w-full h-full cursor-crosshair"
+          onTouchStart={(e) => {
+            e.preventDefault();
+            handleCanvasClick(e);
+          }}
+          className="w-full h-full cursor-crosshair touch-none"
         />
 
         {/* Overlays */}
-        <div className="absolute inset-0 pointer-events-none border-[40px] border-black/20 rounded-2xl" style={{ boxShadow: 'inset 0 0 100px rgba(0,0,0,0.5)' }} />
-        <div className="absolute inset-0 pointer-events-none flex justify-between px-10">
-          <div className="w-1 h-full bg-black/10" />
-          <div className="w-1 h-full bg-black/10" />
+        <div className="absolute inset-0 pointer-events-none border-[20px] sm:border-[40px] border-black/20 rounded-xl sm:rounded-2xl" style={{ boxShadow: 'inset 0 0 50px sm:inset 0 0 100px rgba(0,0,0,0.5)' }} />
+        <div className="absolute inset-0 pointer-events-none flex justify-between px-5 sm:px-10">
+          <div className="w-0.5 sm:w-1 h-full bg-black/10" />
+          <div className="w-0.5 sm:w-1 h-full bg-black/10" />
         </div>
         
         <AnimatePresence>
@@ -870,7 +873,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-[#050505] flex flex-col items-center justify-center p-8 text-center"
+              className="absolute inset-0 bg-[#050505] flex flex-col items-center justify-center p-4 sm:p-8 text-center"
             >
               <div className="absolute inset-0 opacity-10 pointer-events-none">
                 <div className="w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-red-900/20 via-transparent to-transparent" />
@@ -880,18 +883,18 @@ export default function App() {
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ duration: 0.8, ease: "easeOut" }}
-                className="mb-8"
+                className="mb-4 sm:mb-8"
               >
-                <Shield className="w-24 h-24 text-sky-500 mx-auto drop-shadow-[0_0_15px_rgba(14,165,233,0.5)]" />
+                <Shield className="w-16 h-16 sm:w-24 sm:h-24 text-sky-500 mx-auto drop-shadow-[0_0_15px_rgba(14,165,233,0.5)]" />
               </motion.div>
 
               <motion.h2 
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.3 }}
-                className="text-6xl font-black mb-6 text-white tracking-tighter italic"
+                className="text-3xl sm:text-6xl font-black mb-4 sm:mb-6 text-white tracking-tighter italic px-2"
                 style={{
-                  textShadow: '3px 3px 0px #0284c7, 6px 6px 0px rgba(0,0,0,0.5)'
+                  textShadow: '2px 2px 0px #0284c7, 4px 4px 0px rgba(0,0,0,0.5)'
                 }}
               >
                 {t.title}
@@ -901,7 +904,7 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.6 }}
-                className="max-w-md mb-12 text-gray-400 text-xs uppercase tracking-[0.3em] font-mono leading-relaxed"
+                className="max-w-xs sm:max-w-md mb-8 sm:mb-12 text-gray-400 text-[10px] sm:text-xs uppercase tracking-[0.2em] sm:tracking-[0.3em] font-mono leading-relaxed px-4"
               >
                 {t.instructions}
               </motion.p>
@@ -911,17 +914,17 @@ export default function App() {
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.9 }}
                 onClick={initGame}
-                className="group relative px-12 py-4 bg-white hover:bg-red-600 text-black hover:text-white font-black rounded-sm transition-all flex items-center gap-3 overflow-hidden border-b-4 border-gray-300 hover:border-red-800 active:translate-y-1 active:border-b-0"
+                className="group relative px-8 sm:px-12 py-3 sm:py-4 bg-white hover:bg-sky-600 text-black hover:text-white font-black rounded-sm transition-all flex items-center gap-2 sm:gap-3 overflow-hidden border-b-4 border-gray-300 hover:border-sky-800 active:translate-y-1 active:border-b-0"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
-                <Play className="w-5 h-5 fill-current" />
-                <span className="tracking-widest">{t.start}</span>
+                <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+                <span className="tracking-widest text-sm sm:text-base">{t.start}</span>
               </motion.button>
               
-              <div className="mt-12 flex gap-8 opacity-30 grayscale">
-                <div className="text-[10px] font-mono">AERIAL DEFENSE</div>
-                <div className="text-[10px] font-mono">CLOUD SHIELD</div>
-                <div className="text-[10px] font-mono">SKY INTERCEPTOR</div>
+              <div className="mt-8 sm:mt-12 flex gap-4 sm:gap-8 opacity-30 grayscale">
+                <div className="text-[8px] sm:text-[10px] font-mono">AERIAL DEFENSE</div>
+                <div className="text-[8px] sm:text-[10px] font-mono">CLOUD SHIELD</div>
+                <div className="text-[8px] sm:text-[10px] font-mono">SKY INTERCEPTOR</div>
               </div>
             </motion.div>
           )}
@@ -930,17 +933,17 @@ export default function App() {
             <motion.div 
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="absolute inset-0 bg-emerald-500/20 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center"
+              className="absolute inset-0 bg-emerald-500/20 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-8 text-center"
             >
-              <div className="bg-black/80 p-8 rounded-3xl border border-emerald-500/30 shadow-2xl">
-                <Trophy className="w-16 h-16 text-yellow-400 mx-auto mb-4" />
-                <h2 className="text-3xl font-bold mb-2">{t.win}</h2>
-                <p className="text-emerald-400 font-mono text-xl mb-6">{t.score}: {score}</p>
+              <div className="bg-black/80 p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-emerald-500/30 shadow-2xl max-w-[90%]">
+                <Trophy className="w-12 h-12 sm:w-16 sm:h-16 text-yellow-400 mx-auto mb-4" />
+                <h2 className="text-xl sm:text-3xl font-bold mb-2">{t.win}</h2>
+                <p className="text-emerald-400 font-mono text-lg sm:text-xl mb-6">{t.score}: {score}</p>
                 <button 
                   onClick={initGame}
-                  className="px-8 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-full transition-all flex items-center gap-2 mx-auto"
+                  className="px-6 sm:px-8 py-2.5 sm:py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-full transition-all flex items-center gap-2 mx-auto text-sm sm:text-base"
                 >
-                  <RotateCcw className="w-5 h-5" />
+                  <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
                   {t.restart}
                 </button>
               </div>
@@ -951,17 +954,17 @@ export default function App() {
             <motion.div 
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="absolute inset-0 bg-red-500/20 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center"
+              className="absolute inset-0 bg-red-500/20 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-8 text-center"
             >
-              <div className="bg-black/80 p-8 rounded-3xl border border-red-500/30 shadow-2xl">
-                <Skull className="w-16 h-16 text-red-500 mx-auto mb-4" />
-                <h2 className="text-3xl font-bold mb-2">{t.lose}</h2>
-                <p className="text-red-400 font-mono text-xl mb-6">{t.score}: {score}</p>
+              <div className="bg-black/80 p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-red-500/30 shadow-2xl max-w-[90%]">
+                <Skull className="w-12 h-12 sm:w-16 sm:h-16 text-red-500 mx-auto mb-4" />
+                <h2 className="text-xl sm:text-3xl font-bold mb-2">{t.lose}</h2>
+                <p className="text-red-400 font-mono text-lg sm:text-xl mb-6">{t.score}: {score}</p>
                 <button 
                   onClick={initGame}
-                  className="px-8 py-3 bg-red-500 hover:bg-red-400 text-white font-bold rounded-full transition-all flex items-center gap-2 mx-auto"
+                  className="px-6 sm:px-8 py-2.5 sm:py-3 bg-red-500 hover:bg-red-400 text-white font-bold rounded-full transition-all flex items-center gap-2 mx-auto text-sm sm:text-base"
                 >
-                  <RotateCcw className="w-5 h-5" />
+                  <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
                   {t.restart}
                 </button>
               </div>
@@ -971,7 +974,7 @@ export default function App() {
       </div>
 
       {/* Footer Instructions */}
-      <div className="mt-8 text-center opacity-40 text-[10px] uppercase tracking-[0.2em] font-mono">
+      <div className="mt-4 sm:mt-8 text-center opacity-40 text-[8px] sm:text-[10px] uppercase tracking-[0.2em] font-mono">
         &copy; 2024 SKY GUARDIAN &bull; STRATEGIC AIR COMMAND
       </div>
     </div>
